@@ -357,10 +357,13 @@ def _eval_directional_delta(
     worse_when: str,
     src: str,
     fmt: str = "number",
+    threshold: float = 0.10,
 ) -> cfg.ControlResult:
     """
     Reads YoY delta from 03_Yearly_KPIs_Current_vs_Last_ (B/C/D).
-    Only flags when the movement is directionally worse versus last year.
+    Only flags when the movement is directionally worse versus last year
+    AND exceeds the specified threshold.
+
       - worse_when = 'up'   -> higher is worse
       - worse_when = 'down' -> lower is worse
       - If B or C is missing -> OK (not evaluated)
@@ -402,9 +405,10 @@ def _eval_directional_delta(
     what = f"Observed: {label} changed {_pct_str(delta)} YoY ({fmt_val(c)} → {fmt_val(b)})."
 
     if worse_when == "up":
-        return flag(what, why, src) if delta > 0 else ok(what, why, src)
+        return flag(what, why, src) if delta > threshold else ok(what, why, src)
+
     if worse_when == "down":
-        return flag(what, why, src) if delta < 0 else ok(what, why, src)
+        return flag(what, why, src) if delta < -threshold else ok(what, why, src)
 
     return ok(what, why, src)
 
@@ -624,6 +628,7 @@ def eval_C007(ctx: DatabricksContext) -> cfg.ControlResult:
         worse_when="up",
         src="03_Yearly_KPIs_Current_vs_Last_!D19 (TACoS YoY delta)",
         fmt="pct",
+        threshold=0.10,
     )
 
 def eval_C008(ctx: DatabricksContext) -> cfg.ControlResult:
@@ -634,6 +639,7 @@ def eval_C008(ctx: DatabricksContext) -> cfg.ControlResult:
         worse_when="up",
         src="03_Yearly_KPIs_Current_vs_Last_!D10",
         fmt="number",
+        threshold=0.10,
     )
 
 def eval_C009(ctx: DatabricksContext) -> cfg.ControlResult:
@@ -644,6 +650,7 @@ def eval_C009(ctx: DatabricksContext) -> cfg.ControlResult:
         worse_when="down",
         src="03_Yearly_KPIs_Current_vs_Last_!D7",
         fmt="number",
+        threshold=0.10,
     )
 
 def eval_C010(ctx: DatabricksContext) -> cfg.ControlResult:
@@ -654,6 +661,7 @@ def eval_C010(ctx: DatabricksContext) -> cfg.ControlResult:
         worse_when="down",
         src="03_Yearly_KPIs_Current_vs_Last_!D8",
         fmt="pct",
+        threshold=0.10,
     )
 
 def eval_C011(ctx: DatabricksContext) -> cfg.ControlResult:
@@ -664,6 +672,7 @@ def eval_C011(ctx: DatabricksContext) -> cfg.ControlResult:
         worse_when="down",
         src="03_Yearly_KPIs_Current_vs_Last_!D12",
         fmt="pct",
+        threshold=0.10,
     )
 
 def eval_C012(ctx: DatabricksContext) -> cfg.ControlResult:
@@ -674,8 +683,9 @@ def eval_C012(ctx: DatabricksContext) -> cfg.ControlResult:
         worse_when="down",
         src="03_Yearly_KPIs_Current_vs_Last_!D14",
         fmt="number",
+        threshold=0.10,
     )
-
+    
 def eval_C013(ctx: DatabricksContext) -> cfg.ControlResult:
     src = "38_Client_Success_Insights_Repo!AG7 ÷ avg(05_Monthly_Sales_YoY_Comparison!C last 3 full months)"
     why = "Fees-to-sales ratio indicates whether service costs remain sustainable relative to account revenue size."
