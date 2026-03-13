@@ -1,4 +1,3 @@
-# run_account_health_agent.py
 from __future__ import annotations
 
 import argparse
@@ -31,25 +30,21 @@ def main():
     # Run evaluation engine
     results, ctx = evaluate_all(ctx)
 
-not_eval = sorted([
-    cid for cid, res in results.items()
-    if isinstance(res.what_we_saw, str) and "not evaluated" in res.what_we_saw.lower()
-])
+    # Track controls that were intentionally not evaluated
+    not_eval = sorted([
+        cid for cid, res in results.items()
+        if isinstance(res.what_we_saw, str) and "not evaluated" in res.what_we_saw.lower()
+    ])
 
-if not_eval:
-    print(f"NOT_EVALUATED_CONTROLS: {', '.join(not_eval)}")
+    if not_eval:
+        print(f"NOT_EVALUATED_CONTROLS: {', '.join(not_eval)}")
 
-    # ------------------------------------------------------------------
-    # Unique filename generation (prevents cached / stale download links)
-    # ------------------------------------------------------------------
-
+    # Unique filename generation
     ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-
     filename = f"{ctx.hash_name} - Account Health Analysis - {ts}.xlsm"
-
     out_path = os.path.join("/mnt/data", filename)
 
-    # Ensure directory exists
+    # Ensure output directory exists
     os.makedirs("/mnt/data", exist_ok=True)
 
     # Write output workbook
@@ -60,24 +55,16 @@ if not_eval:
         results=results,
     )
 
-    # ------------------------------------------------------------------
-    # Sanity check (prevents empty / broken files)
-    # ------------------------------------------------------------------
-
+    # Sanity check
     if (not os.path.exists(out_path)) or os.path.getsize(out_path) < 50000:
         raise RuntimeError(f"Output file missing or too small: {out_path}")
 
-    # ------------------------------------------------------------------
-    # Print output info
-    # ------------------------------------------------------------------
-
+    # Final execution logs
     print("DONE")
     print(f"Output file: {out_path}")
     print(f"Account: {ctx.hash_name}")
     print(f"Window: {ctx.window_str}")
     print(f"Downloaded: {ctx.downloaded_dt}")
-
-    # This line is critical for the GPT to generate a reliable download link
     print(f"SANDBOX_LINK: sandbox:{out_path}")
 
 
