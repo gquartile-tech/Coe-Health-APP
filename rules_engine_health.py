@@ -337,10 +337,12 @@ def _eval_abs_delta(
     ad = abs(delta)
 
     def fmt_val(v: float) -> str:
-        if fmt == "pct":
-            vv = v if v <= 1 else v / 100
-            return _pct_str(vv)
-        return _money_str(v)
+    if fmt == "pct":
+        vv = v if v <= 1 else v / 100
+        return _pct_str(vv)
+    if fmt == "money2":
+        return _money_str_2(v)
+    return _money_str(v)
 
     what = f"Observed: {label} changed {_pct_str(delta)} YoY ({fmt_val(c)} → {fmt_val(b)})."
 
@@ -638,7 +640,7 @@ def eval_C008(ctx: DatabricksContext) -> cfg.ControlResult:
         label="CPC",
         worse_when="up",
         src="03_Yearly_KPIs_Current_vs_Last_!D10",
-        fmt="number",
+        fmt="money2",
         threshold=0.10,
     )
 
@@ -933,7 +935,7 @@ def eval_C024(ctx: DatabricksContext) -> cfg.ControlResult:
         return _bench_missing_ok("CPC", src, why)
 
     status = _bench_status_directional(our, bench, "higher_worse")
-    what = f"Observed: CPC = {_money_str(our)} vs category benchmark = {_money_str(bench)}."
+    what = f"Observed: CPC = {_money_str_2(our)} vs category benchmark = {_money_str_2(bench)}."
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
 
 def eval_C025(ctx: DatabricksContext) -> cfg.ControlResult:
