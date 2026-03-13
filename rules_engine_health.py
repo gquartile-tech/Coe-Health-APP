@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
 from typing import Dict, Optional, List, Tuple
 import re
 
@@ -24,6 +23,7 @@ def ok(what: str = "", why: str = "", src: str = "", note: str = "") -> cfg.Cont
         note=note,
     )
 
+
 def partial(what: str, why: str = "", src: str = "", note: str = "") -> cfg.ControlResult:
     if not what:
         what = "Observed: Partial signal detected."
@@ -34,6 +34,7 @@ def partial(what: str, why: str = "", src: str = "", note: str = "") -> cfg.Cont
         data_source=src,
         note=note,
     )
+
 
 def flag(what: str, why: str = "", src: str = "", note: str = "") -> cfg.ControlResult:
     if not what:
@@ -77,22 +78,31 @@ def _to_float(x) -> Optional[float]:
     except Exception:
         return None
 
+
 def _pct_str(x: float, decimals: int = 1) -> str:
     return f"{x*100:.{decimals}f}%"
 
+
 def _money_str(x: float) -> str:
     return f"{x:,.0f}"
+
+
+def _money_str_2(x: float) -> str:
+    return f"{x:,.2f}"
+
 
 def _excel_row_to_df_index(excel_row: int) -> int:
     # header=5 => df row 0 is Excel row 7
     return excel_row - 7
 
+
 def _col_letter_to_zero_index(letter: str) -> int:
     letter = letter.upper().strip()
     n = 0
     for ch in letter:
-        n = n * 26 + (ord(ch) - ord('A') + 1)
+        n = n * 26 + (ord(ch) - ord("A") + 1)
     return n - 1
+
 
 def _read_cell_by_pos(df: pd.DataFrame, excel_col_letter: str, excel_row: int) -> Optional[float]:
     if df is None or df.empty:
@@ -102,6 +112,7 @@ def _read_cell_by_pos(df: pd.DataFrame, excel_col_letter: str, excel_row: int) -
     if r < 0 or c < 0 or r >= len(df.index) or c >= len(df.columns):
         return None
     return _to_float(df.iloc[r, c])
+
 
 def _read_str_cell_by_pos(df: pd.DataFrame, excel_col_letter: str, excel_row: int) -> str:
     if df is None or df.empty:
@@ -140,12 +151,14 @@ def _parse_months_from_text(text: str) -> set[int]:
     }
 
     for m in re.finditer(r"\b(1[0-2]|[1-9])\s*-\s*(1[0-2]|[1-9])\b", t):
-        a = int(m.group(1)); b = int(m.group(2))
+        a = int(m.group(1))
+        b = int(m.group(2))
         if a <= b:
             months |= set(range(a, b + 1))
 
     for m in re.finditer(r"\b([a-z]{3,9})\s*-\s*([a-z]{3,9})\b", t):
-        a = name_map.get(m.group(1)); b = name_map.get(m.group(2))
+        a = name_map.get(m.group(1))
+        b = name_map.get(m.group(2))
         if a and b and a <= b:
             months |= set(range(a, b + 1))
 
@@ -193,7 +206,13 @@ def _latest_full_month_anchor(ctx: DatabricksContext) -> Optional[pd.Timestamp]:
     # Always take the prior month as the "latest full month"
     return month_start - pd.offsets.MonthBegin(1)
 
-def _get_last_n_full_month_rows(df_monthly: pd.DataFrame, ctx: DatabricksContext, n: int, month_col_index: int = 0) -> Optional[pd.DataFrame]:
+
+def _get_last_n_full_month_rows(
+    df_monthly: pd.DataFrame,
+    ctx: DatabricksContext,
+    n: int,
+    month_col_index: int = 0,
+) -> Optional[pd.DataFrame]:
     if df_monthly is None or df_monthly.empty:
         return None
     months = pd.to_datetime(df_monthly.iloc[:, month_col_index], errors="coerce")
@@ -209,7 +228,13 @@ def _get_last_n_full_month_rows(df_monthly: pd.DataFrame, ctx: DatabricksContext
         return None
     return tmp.tail(n)
 
-def _apply_seasonality_thresholds(ctx: DatabricksContext, months_involved: List[pd.Timestamp], base_flag: float, base_partial: float) -> Tuple[float, float]:
+
+def _apply_seasonality_thresholds(
+    ctx: DatabricksContext,
+    months_involved: List[pd.Timestamp],
+    base_flag: float,
+    base_partial: float,
+) -> Tuple[float, float]:
     """
     Adjust thresholds for MoM/QoQ only when months overlap declared seasonality.
     """
@@ -228,13 +253,16 @@ def _apply_seasonality_thresholds(ctx: DatabricksContext, months_involved: List[
 def _primary_kpi_tag(ctx: DatabricksContext) -> str:
     return f"Primary KPI for this account: {ctx.primary_kpi}."
 
+
 def _why_constraint_metric(ctx: DatabricksContext, metric: str) -> str:
     if metric.upper() == ctx.primary_kpi.upper():
         return f"{_primary_kpi_tag(ctx)} Exceeding the {metric} constraint directly increases profitability risk and limits scaling."
     return f"{_primary_kpi_tag(ctx)} This metric is secondary for governance but still indicates efficiency pressure if it breaches constraints."
 
+
 def _why_trend_metric(metric: str) -> str:
     return f"A sustained negative trend in {metric} indicates performance deterioration that can restrict scalability."
+
 
 def _why_benchmark(metric: str, direction: str) -> str:
     if direction == "higher_worse":
@@ -300,22 +328,16 @@ def _eval_abs_delta(
 ) -> cfg.ControlResult:
     """
     Reads YoY delta from 03_Yearly_KPIs_Current_vs_Last_ (B/C/D).
-    NEW RULE (per your request):
-      - If B or C is missing -> OK (not evaluated)
-      - If B & C exist but D missing -> compute D
-    Thresholds use ABS(delta) for most metrics (CPC/Impr/CTR/CVR/AOV).
     """
     df03 = get_dataset(ctx, "YEARLY_KPIS")
     why = _why_trend_metric(label)
     if df03 is None or df03.empty:
-        # keeping as FLAG because this is a required tab for multiple controls
         return flag("Observed: Yearly KPI table missing; cannot evaluate YoY trend.", why, src)
 
     d = _read_cell_by_pos(df03, "D", row)
     b = _read_cell_by_pos(df03, "B", row)
     c = _read_cell_by_pos(df03, "C", row)
 
-    # ✅ Only evaluate when BOTH periods exist
     if b is None or c is None:
         return ok(
             f"Observed: {label} trend not evaluated because one or both comparison periods are missing (B{row}/C{row}).",
@@ -323,7 +345,6 @@ def _eval_abs_delta(
             src,
         )
 
-    # If D missing, compute safely
     if d is None:
         if c == 0:
             return ok(
@@ -337,12 +358,12 @@ def _eval_abs_delta(
     ad = abs(delta)
 
     def fmt_val(v: float) -> str:
-    if fmt == "pct":
-        vv = v if v <= 1 else v / 100
-        return _pct_str(vv)
-    if fmt == "money2":
-        return _money_str_2(v)
-    return _money_str(v)
+        if fmt == "pct":
+            vv = v if v <= 1 else v / 100
+            return _pct_str(vv)
+        if fmt == "money2":
+            return _money_str_2(v)
+        return _money_str(v)
 
     what = f"Observed: {label} changed {_pct_str(delta)} YoY ({fmt_val(c)} → {fmt_val(b)})."
 
@@ -351,6 +372,7 @@ def _eval_abs_delta(
     if ad <= partial_th:
         return partial(what, why, src)
     return flag(what, why, src)
+
 
 def _eval_directional_delta(
     ctx: DatabricksContext,
@@ -365,11 +387,6 @@ def _eval_directional_delta(
     Reads YoY delta from 03_Yearly_KPIs_Current_vs_Last_ (B/C/D).
     Only flags when the movement is directionally worse versus last year
     AND exceeds the specified threshold.
-
-      - worse_when = 'up'   -> higher is worse
-      - worse_when = 'down' -> lower is worse
-      - If B or C is missing -> OK (not evaluated)
-      - If B & C exist but D missing -> compute D
     """
     df03 = get_dataset(ctx, "YEARLY_KPIS")
     why = _why_trend_metric(label)
@@ -402,9 +419,24 @@ def _eval_directional_delta(
         if fmt == "pct":
             vv = v if v <= 1 else v / 100
             return _pct_str(vv)
+        if fmt == "money2":
+            return _money_str_2(v)
         return _money_str(v)
 
-    what = f"Observed: {label} changed {_pct_str(delta)} YoY ({fmt_val(c)} → {fmt_val(b)})."
+    direction_txt = "increased" if delta > 0 else "decreased"
+    sign = "+" if delta > 0 else ""
+
+    if worse_when == "up":
+        impact_txt = "indicating higher cost/efficiency pressure" if delta > 0 else "indicating improved efficiency"
+    elif worse_when == "down":
+        impact_txt = "indicating weaker performance" if delta < 0 else "indicating improved performance"
+    else:
+        impact_txt = "versus last year"
+
+    what = (
+        f"Observed: {label} {direction_txt} versus last year, {impact_txt}. "
+        f"{fmt_val(c)} → {fmt_val(b)} ({sign}{_pct_str(delta)} YoY)."
+    )
 
     if worse_when == "up":
         return flag(what, why, src) if delta > threshold else ok(what, why, src)
@@ -418,12 +450,6 @@ def _eval_directional_delta(
 # ---- Benchmarks ----
 
 def _bench_compare_directional(our: float, bench: float, direction: str) -> float:
-    """
-    Returns a directional deviation score:
-      higher_worse -> only positive deviation (our > bench)
-      lower_worse  -> only negative deviation (our < bench) expressed positive
-      abs          -> absolute deviation magnitude
-    """
     if bench == 0:
         return float("inf")
     dev = (our - bench) / bench
@@ -433,12 +459,14 @@ def _bench_compare_directional(our: float, bench: float, direction: str) -> floa
         return max(-dev, 0.0)
     return abs(dev)
 
+
 def _bench_status(dev: float, ok_th: float, partial_th: float) -> str:
     if dev < ok_th:
         return cfg.STATUS_OK
     if dev <= partial_th:
         return cfg.STATUS_PARTIAL
     return cfg.STATUS_FLAG
+
 
 def _bench_status_directional(our: float, bench: float, direction: str) -> str:
     if direction == "higher_worse":
@@ -447,8 +475,8 @@ def _bench_status_directional(our: float, bench: float, direction: str) -> str:
         return cfg.STATUS_FLAG if our < bench else cfg.STATUS_OK
     return cfg.STATUS_OK
 
+
 def _bench_missing_ok(metric_label: str, src: str, why: str) -> cfg.ControlResult:
-    # ✅ Per your request: missing benchmark/account values => OK (not evaluated)
     return ok(
         f"Observed: {metric_label} benchmark comparison not evaluated because required account or benchmark data is missing.",
         why,
@@ -476,7 +504,12 @@ def eval_C001(ctx: DatabricksContext) -> cfg.ControlResult:
         return flag("Observed: TotalSales values missing/invalid for MoM revenue calculation.", _why_trend_metric("revenue"), src)
 
     mom = (rev0 - rev1) / rev1
-    flag_th, partial_th = _apply_seasonality_thresholds(ctx, [pd.Timestamp(m0), pd.Timestamp(m1)], base_flag=-0.10, base_partial=-0.05)
+    flag_th, partial_th = _apply_seasonality_thresholds(
+        ctx,
+        [pd.Timestamp(m0), pd.Timestamp(m1)],
+        base_flag=-0.10,
+        base_partial=-0.05,
+    )
 
     what = f"Observed: Revenue changed {_pct_str(mom)} vs prior month ({_money_str(rev1)} → {_money_str(rev0)}) using the latest full month available."
     why = _why_trend_metric("revenue")
@@ -486,6 +519,7 @@ def eval_C001(ctx: DatabricksContext) -> cfg.ControlResult:
     if mom <= partial_th:
         return partial(what, why, src)
     return ok(what, why, src)
+
 
 def eval_C002(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "L24M_MONTHLY")
@@ -505,7 +539,12 @@ def eval_C002(ctx: DatabricksContext) -> cfg.ControlResult:
         return flag("Observed: Previous-quarter revenue is zero/invalid; QoQ cannot be computed.", _why_trend_metric("revenue"), src)
 
     qoq = (q0 - q1) / q1
-    flag_th, partial_th = _apply_seasonality_thresholds(ctx, [pd.Timestamp(m) for m in months], base_flag=-0.10, base_partial=-0.05)
+    flag_th, partial_th = _apply_seasonality_thresholds(
+        ctx,
+        [pd.Timestamp(m) for m in months],
+        base_flag=-0.10,
+        base_partial=-0.05,
+    )
 
     what = f"Observed: Revenue changed {_pct_str(qoq)} comparing the last 3 full months ({_money_str(q1)} → {_money_str(q0)})."
     why = _why_trend_metric("revenue")
@@ -515,6 +554,7 @@ def eval_C002(ctx: DatabricksContext) -> cfg.ControlResult:
     if qoq <= partial_th:
         return partial(what, why, src)
     return ok(what, why, src)
+
 
 def eval_C003(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "YEARLY_KPIS")
@@ -536,6 +576,7 @@ def eval_C003(ctx: DatabricksContext) -> cfg.ControlResult:
     if yoy <= -0.05:
         return partial(what, why, src)
     return ok(what, why, src)
+
 
 def eval_C004(ctx: DatabricksContext) -> cfg.ControlResult:
     df02 = get_dataset(ctx, "KPI_RANGE")
@@ -563,6 +604,7 @@ def eval_C004(ctx: DatabricksContext) -> cfg.ControlResult:
     over_pp = (actual - target) * 100
     return flag(f"{what} (over by {over_pp:.1f}pp).", why, src)
 
+
 def eval_C005(ctx: DatabricksContext) -> cfg.ControlResult:
     df02 = get_dataset(ctx, "KPI_RANGE")
     src = "02_Date_Range_KPIs__Date_Range_!J7 vs 38_Client_Success_Insights_Repo!AX7"
@@ -589,6 +631,7 @@ def eval_C005(ctx: DatabricksContext) -> cfg.ControlResult:
     over_pp = (actual - target) * 100
     return flag(f"{what} (over by {over_pp:.1f}pp).", why, src)
 
+
 def eval_C006(ctx: DatabricksContext) -> cfg.ControlResult:
     df02 = get_dataset(ctx, "KPI_RANGE")
     src = "02_Date_Range_KPIs__Date_Range_!G7 vs 38_Client_Success_Insights_Repo!AM7 (budget target)"
@@ -614,13 +657,17 @@ def eval_C006(ctx: DatabricksContext) -> cfg.ControlResult:
     dev = (spend - budget) / budget
     abs_dev = abs(dev)
 
-    what = f"Observed: Spend = {_money_str(spend)} vs budget target = {_money_str(budget)} (Δ {_pct_str(dev)})."
+    what = (
+        f"Observed: Spend is {'above' if dev > 0 else 'below'} the documented budget target. "
+        f"{_money_str(budget)} target vs {_money_str(spend)} actual ({_pct_str(dev)})."
+    )
 
     if abs_dev <= 0.10:
         return ok(what, why, src)
     if abs_dev <= 0.20:
         return partial(what, why, src)
     return flag(what, why, src)
+
 
 def eval_C007(ctx: DatabricksContext) -> cfg.ControlResult:
     return _eval_directional_delta(
@@ -633,6 +680,7 @@ def eval_C007(ctx: DatabricksContext) -> cfg.ControlResult:
         threshold=0.10,
     )
 
+
 def eval_C008(ctx: DatabricksContext) -> cfg.ControlResult:
     return _eval_directional_delta(
         ctx=ctx,
@@ -643,6 +691,7 @@ def eval_C008(ctx: DatabricksContext) -> cfg.ControlResult:
         fmt="money2",
         threshold=0.10,
     )
+
 
 def eval_C009(ctx: DatabricksContext) -> cfg.ControlResult:
     return _eval_directional_delta(
@@ -655,6 +704,7 @@ def eval_C009(ctx: DatabricksContext) -> cfg.ControlResult:
         threshold=0.10,
     )
 
+
 def eval_C010(ctx: DatabricksContext) -> cfg.ControlResult:
     return _eval_directional_delta(
         ctx=ctx,
@@ -665,6 +715,7 @@ def eval_C010(ctx: DatabricksContext) -> cfg.ControlResult:
         fmt="pct",
         threshold=0.10,
     )
+
 
 def eval_C011(ctx: DatabricksContext) -> cfg.ControlResult:
     return _eval_directional_delta(
@@ -677,6 +728,7 @@ def eval_C011(ctx: DatabricksContext) -> cfg.ControlResult:
         threshold=0.10,
     )
 
+
 def eval_C012(ctx: DatabricksContext) -> cfg.ControlResult:
     return _eval_directional_delta(
         ctx=ctx,
@@ -687,7 +739,8 @@ def eval_C012(ctx: DatabricksContext) -> cfg.ControlResult:
         fmt="number",
         threshold=0.10,
     )
-    
+
+
 def eval_C013(ctx: DatabricksContext) -> cfg.ControlResult:
     src = "38_Client_Success_Insights_Repo!AG7 ÷ avg(05_Monthly_Sales_YoY_Comparison!C last 3 full months)"
     why = "Fees-to-sales ratio indicates whether service costs remain sustainable relative to account revenue size."
@@ -716,6 +769,7 @@ def eval_C013(ctx: DatabricksContext) -> cfg.ControlResult:
         return partial(what, why, src)
     return flag(what, why, src)
 
+
 def eval_C014(ctx: DatabricksContext) -> cfg.ControlResult:
     return ok(
         "Observed: NTB% dataset not available in the Databricks export; control currently not evaluated.",
@@ -723,12 +777,14 @@ def eval_C014(ctx: DatabricksContext) -> cfg.ControlResult:
         "AMC (external)",
     )
 
+
 def eval_C015(ctx: DatabricksContext) -> cfg.ControlResult:
     return ok(
         "Observed: Organic rank dataset not available in the Databricks export; control currently not evaluated.",
         "Organic rank dataset pending integration",
         "External dataset (pending)",
     )
+
 
 def eval_C016(ctx: DatabricksContext) -> cfg.ControlResult:
     df42 = get_dataset(ctx, "GGS_DOMO")
@@ -746,6 +802,7 @@ def eval_C016(ctx: DatabricksContext) -> cfg.ControlResult:
         return flag(what, why, src)
     return ok(what, why, src)
 
+
 def eval_C017(ctx: DatabricksContext) -> cfg.ControlResult:
     df42 = get_dataset(ctx, "GGS_DOMO")
     src = "42_Amazon_GGS_Domo!K7/K8/K9"
@@ -762,6 +819,7 @@ def eval_C017(ctx: DatabricksContext) -> cfg.ControlResult:
         return flag(what, why, src)
     return ok(what, why, src)
 
+
 def eval_C018(ctx: DatabricksContext) -> cfg.ControlResult:
     df42 = get_dataset(ctx, "GGS_DOMO")
     src = "42_Amazon_GGS_Domo!M7/M8/M9"
@@ -777,6 +835,7 @@ def eval_C018(ctx: DatabricksContext) -> cfg.ControlResult:
     if any(v == "true" for v in [m7, m8, m9]):
         return flag(what, why, src)
     return ok(what, why, src)
+
 
 def eval_C019(ctx: DatabricksContext) -> cfg.ControlResult:
     df46 = get_dataset(ctx, "STRIPE")
@@ -848,12 +907,14 @@ def eval_C019(ctx: DatabricksContext) -> cfg.ControlResult:
         return partial(what, why, src)
     return ok(what, why, src)
 
+
 def eval_C020(ctx: DatabricksContext) -> cfg.ControlResult:
     return ok(
         "Observed: Churn risk dataset not available in the Databricks export; control currently not evaluated.",
         "Churn Zero Score dataset pending integration",
         "External dataset (pending)",
     )
+
 
 def eval_C021(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "COHORT_BENCH")
@@ -874,8 +935,12 @@ def eval_C021(ctx: DatabricksContext) -> cfg.ControlResult:
         bench /= 100
 
     status = _bench_status_directional(our, bench, "higher_worse")
-    what = f"Observed: ACoS = {_pct_str(our)} vs category benchmark = {_pct_str(bench)}."
+    what = (
+        f"Observed: ACoS is {'above' if our > bench else 'in line with or below'} the category benchmark. "
+        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+    )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
+
 
 def eval_C022(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "COHORT_BENCH")
@@ -896,8 +961,12 @@ def eval_C022(ctx: DatabricksContext) -> cfg.ControlResult:
         bench /= 100
 
     status = _bench_status_directional(our, bench, "lower_worse")
-    what = f"Observed: Conversion Rate = {_pct_str(our)} vs category benchmark = {_pct_str(bench)}."
+    what = (
+        f"Observed: Conversion Rate is {'below' if our < bench else 'in line with or above'} the category benchmark. "
+        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+    )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
+
 
 def eval_C023(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "COHORT_BENCH")
@@ -918,8 +987,12 @@ def eval_C023(ctx: DatabricksContext) -> cfg.ControlResult:
         bench /= 100
 
     status = _bench_status_directional(our, bench, "higher_worse")
-    what = f"Observed: TACoS = {_pct_str(our)} vs category benchmark = {_pct_str(bench)}."
+    what = (
+        f"Observed: TACoS is {'above' if our > bench else 'in line with or below'} the category benchmark. "
+        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+    )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
+
 
 def eval_C024(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "COHORT_BENCH")
@@ -935,8 +1008,12 @@ def eval_C024(ctx: DatabricksContext) -> cfg.ControlResult:
         return _bench_missing_ok("CPC", src, why)
 
     status = _bench_status_directional(our, bench, "higher_worse")
-    what = f"Observed: CPC = {_money_str_2(our)} vs category benchmark = {_money_str_2(bench)}."
+    what = (
+        f"Observed: CPC is {'above' if our > bench else 'in line with or below'} the category benchmark. "
+        f"{_money_str_2(bench)} benchmark vs {_money_str_2(our)} actual."
+    )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
+
 
 def eval_C025(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "COHORT_BENCH")
@@ -957,8 +1034,12 @@ def eval_C025(ctx: DatabricksContext) -> cfg.ControlResult:
         bench /= 100
 
     status = _bench_status_directional(our, bench, "lower_worse")
-    what = f"Observed: Organic Sales Rate = {_pct_str(our)} vs category benchmark = {_pct_str(bench)}."
+    what = (
+        f"Observed: Organic Sales Rate is {'below' if our < bench else 'in line with or above'} the category benchmark. "
+        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+    )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
+
 
 def eval_C026(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "COHORT_BENCH")
@@ -979,7 +1060,10 @@ def eval_C026(ctx: DatabricksContext) -> cfg.ControlResult:
         bench /= 100
 
     status = _bench_status_directional(our, bench, "lower_worse")
-    what = f"Observed: Sales Growth = {_pct_str(our)} vs category benchmark = {_pct_str(bench)}."
+    what = (
+        f"Observed: Sales Growth is {'below' if our < bench else 'in line with or above'} the category benchmark. "
+        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+    )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
 
 
