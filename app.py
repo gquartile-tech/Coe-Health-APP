@@ -10,6 +10,7 @@ import os
 import sys
 import traceback
 import re
+import gc
 from datetime import datetime
 from pathlib import Path
 
@@ -28,10 +29,6 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # ── Import analysis modules ───────────────────────────────────────────────────
 sys.path.insert(0, str(BASE_DIR))
 
-from reader_databricks_health import load_databricks_context
-from rules_engine_health import evaluate_all
-from writer_account_health import write_account_health_output
-
 MIN_OUTPUT_BYTES = 5_000   # lowered — xlsm can be small
 
 app = Flask(__name__)
@@ -46,6 +43,10 @@ def _safe_fn(name: str) -> str:
 
 
 def run_full_analysis(input_path: str) -> dict:
+    from reader_databricks_health import load_databricks_context
+    from rules_engine_health import evaluate_all
+    from writer_account_health import write_account_health_output
+
     if not TEMPLATE_FILE.exists():
         raise FileNotFoundError(f"Template not found: {TEMPLATE_FILE}")
 
@@ -75,6 +76,9 @@ def run_full_analysis(input_path: str) -> dict:
     ok_count      = sum(1 for r in results.values() if r.status == "OK")
     flag_count    = sum(1 for r in results.values() if r.status == "FLAG")
     partial_count = sum(1 for r in results.values() if r.status == "PARTIAL")
+
+    del ctx, results
+    gc.collect()
 
     return {
         "download_filename": download_name,
@@ -121,6 +125,12 @@ def analyze():
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"Analysis failed: {e}"}), 500
+    finally:
+        try:
+            os.remove(input_path)
+        except Exception:
+            pass
+        gc.collect()
 
     info["download_url"] = f"/download/{info['download_filename']}"
     return jsonify(info)
