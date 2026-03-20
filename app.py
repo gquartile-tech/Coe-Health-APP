@@ -77,23 +77,33 @@ def run_full_analysis(input_path: str) -> dict:
     flag_count    = sum(1 for r in results.values() if r.status == "FLAG")
     partial_count = sum(1 for r in results.values() if r.status == "PARTIAL")
 
+    # Extract all values from ctx/results before cleanup
+    window_str = getattr(ctx, "window_str", "")
+    ref_date = str(getattr(ctx, "ref_date", "") or "")
+    downloaded_dt = str(getattr(ctx, "downloaded_dt", "") or "")
+    primary_kpi = getattr(ctx, "primary_kpi", "ACOS")
+    acos_constraint = f"{ctx.acos_constraint*100:.1f}%" if ctx.acos_constraint else "NOT FOUND"
+    tacos_constraint = f"{ctx.tacos_constraint*100:.1f}%" if ctx.tacos_constraint else "NOT FOUND"
+    flag_ids = [cid for cid, r in results.items() if r.status == "FLAG"]
+    partial_ids = [cid for cid, r in results.items() if r.status == "PARTIAL"]
+
     del ctx, results
     gc.collect()
 
     return {
         "download_filename": download_name,
         "account":           hash_name,
-        "window":            getattr(ctx, "window_str", ""),
-        "ref_date":          str(getattr(ctx, "ref_date", "") or ""),
-        "downloaded":        str(getattr(ctx, "downloaded_dt", "") or ""),
-        "primary_kpi":       getattr(ctx, "primary_kpi", "ACOS"),
-        "acos_constraint":   f"{ctx.acos_constraint*100:.1f}%" if ctx.acos_constraint else "NOT FOUND",
-        "tacos_constraint":  f"{ctx.tacos_constraint*100:.1f}%" if ctx.tacos_constraint else "NOT FOUND",
+        "window":            window_str,
+        "ref_date":          ref_date,
+        "downloaded":        downloaded_dt,
+        "primary_kpi":       primary_kpi,
+        "acos_constraint":   acos_constraint,
+        "tacos_constraint":  tacos_constraint,
         "ok":                ok_count,
         "flag":              flag_count,
         "partial":           partial_count,
-        "flag_ids":          [cid for cid, r in results.items() if r.status == "FLAG"],
-        "partial_ids":       [cid for cid, r in results.items() if r.status == "PARTIAL"],
+        "flag_ids":          flag_ids,
+        "partial_ids":       partial_ids,
     }
 
 
