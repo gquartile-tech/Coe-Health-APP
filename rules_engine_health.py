@@ -788,8 +788,8 @@ def eval_C015(ctx: DatabricksContext) -> cfg.ControlResult:
 
 def eval_C016(ctx: DatabricksContext) -> cfg.ControlResult:
     df42 = get_dataset(ctx, "GGS_DOMO")
-    src = "42_Amazon_GGS_Domo!H7/H8/H9"
-    why = "GGS pacing flags indicate whether planned growth programs are executing as expected."
+    src = "42_Amazon_GGS_Domo!H7/H8/H9 + 09_Campaigns_Grouped_by_Amazon_!I (Sponsored Display spend %)"
+    why = "GGS pacing flags indicate whether planned growth programs are executing as expected. SD spend share validates Sponsored Display investment is sufficient to support growth commitments."
     if df42 is None or df42.empty:
         return flag("Observed: GGS Domo tab missing; cannot evaluate GGS pacing.", why, src)
     h7 = _read_str_cell_by_pos(df42, "H", 7).lower()
@@ -797,9 +797,38 @@ def eval_C016(ctx: DatabricksContext) -> cfg.ControlResult:
     h9 = _read_str_cell_by_pos(df42, "H", 9).lower()
     if not (h7 or h8 or h9):
         return flag("Observed: GGS pacing fields missing in 42_Amazon_GGS_Domo (H7–H9).", why, src)
-    what = f"Observed: GGS pacing flags (SD/SP/SB) = {h7}/{h8}/{h9}."
-    if any(v == "yes" for v in [h7, h8, h9]):
+    what_ggs = f"Observed: GGS pacing flags (SD/SP/SB) = {h7}/{h8}/{h9}."
+
+    # If GGS is not triggered, always OK — no further checks needed
+    if not any(v == "yes" for v in [h7, h8, h9]):
+        return ok(what_ggs, why, src)
+
+    # GGS is triggered — now check SD spend share in 09_Campaigns_Grouped_by_Amazon_
+    df09 = get_dataset(ctx, "CAMP_GROUPED")
+    sd_pct = None
+    if df09 is not None and not df09.empty:
+        for i in range(len(df09)):
+            row_label = str(df09.iloc[i, 0]).strip().lower() if df09.iloc[i, 0] is not None else ""
+            if "sponsored display" in row_label:
+                sd_pct = _to_float(df09.iloc[i, _col_letter_to_zero_index("I")])
+                break
+
+    # Treat missing or not-found SD row as zero spend
+    if sd_pct is None:
+        sd_pct = 0.0
+    if sd_pct > 1:
+        sd_pct /= 100.0
+
+    what = (
+        f"{what_ggs} "
+        f"Sponsored Display spend share = {_pct_str(sd_pct)} "
+        f"(source: 09_Campaigns_Grouped_by_Amazon_ column I)."
+    )
+
+    if sd_pct < 0.04:
         return flag(what, why, src)
+    if sd_pct <= 0.05:
+        return partial(what, why, src)
     return ok(what, why, src)
 
 
@@ -808,15 +837,15 @@ def eval_C017(ctx: DatabricksContext) -> cfg.ControlResult:
     src = "42_Amazon_GGS_Domo!K7/K8/K9"
     why = "DAA pacing flags indicate whether key demand acceleration investments are on track."
     if df42 is None or df42.empty:
-        return flag("Observed: GGS Domo tab missing; cannot evaluate DAA pacing.", why, src)
+        return ok("Observed: GGS Domo tab missing; DAA pacing not evaluated.", why, src)
     k7 = _read_str_cell_by_pos(df42, "K", 7).lower()
     k8 = _read_str_cell_by_pos(df42, "K", 8).lower()
     k9 = _read_str_cell_by_pos(df42, "K", 9).lower()
     if not (k7 or k8 or k9):
-        return flag("Observed: DAA pacing fields missing in 42_Amazon_GGS_Domo (K7–K9).", why, src)
+        return ok("Observed: DAA pacing fields missing in 42_Amazon_GGS_Domo (K7-K9); not evaluated.", why, src)
     what = f"Observed: DAA pacing flags (SD/SP/SB) = {k7}/{k8}/{k9}."
     if any(v == "true" for v in [k7, k8, k9]):
-        return flag(what, why, src)
+        return partial(what, why, src)
     return ok(what, why, src)
 
 
@@ -825,15 +854,15 @@ def eval_C018(ctx: DatabricksContext) -> cfg.ControlResult:
     src = "42_Amazon_GGS_Domo!M7/M8/M9"
     why = "SAS pacing flags indicate whether strategic support initiatives are executing as committed."
     if df42 is None or df42.empty:
-        return flag("Observed: GGS Domo tab missing; cannot evaluate SAS pacing.", why, src)
+        return ok("Observed: GGS Domo tab missing; SAS pacing not evaluated.", why, src)
     m7 = _read_str_cell_by_pos(df42, "M", 7).lower()
     m8 = _read_str_cell_by_pos(df42, "M", 8).lower()
     m9 = _read_str_cell_by_pos(df42, "M", 9).lower()
     if not (m7 or m8 or m9):
-        return flag("Observed: SAS pacing fields missing in 42_Amazon_GGS_Domo (M7–M9).", why, src)
+        return ok("Observed: SAS pacing fields missing in 42_Amazon_GGS_Domo (M7-M9); not evaluated.", why, src)
     what = f"Observed: SAS pacing flags (SD/SP/SB) = {m7}/{m8}/{m9}."
     if any(v == "true" for v in [m7, m8, m9]):
-        return flag(what, why, src)
+        return partial(what, why, src)
     return ok(what, why, src)
 
 
@@ -909,11 +938,62 @@ def eval_C019(ctx: DatabricksContext) -> cfg.ControlResult:
 
 
 def eval_C020(ctx: DatabricksContext) -> cfg.ControlResult:
-    return ok(
-        "Observed: Churn risk dataset not available in the Databricks export; control currently not evaluated.",
-        "Churn Zero Score dataset pending integration",
-        "External dataset (pending)",
+    df = get_dataset(ctx, "CUST_JOURNEY_MKT")
+    src = "48_Customer_Journey_Marketplac!H:L (avg satisfaction scores, Completed rows only)"
+    why = "Customer satisfaction scores across relationship, reporting, strategy, and performance dimensions indicate overall account health and churn risk."
+
+    if df is None or df.empty:
+        return ok(
+            "Observed: Customer Journey Marketplaces tab missing; satisfaction score not evaluated.",
+            why,
+            src,
+        )
+
+    # Column G = Milestone_c (index 6), Columns H-L = indices 7-11
+    try:
+        milestone_col = df.iloc[:, 6].astype(str).str.strip().str.lower()
+        completed_rows = df[milestone_col == "completed"]
+    except Exception:
+        return ok(
+            "Observed: Could not parse Milestone column in 48_Customer_Journey_Marketplac; not evaluated.",
+            why,
+            src,
+        )
+
+    if completed_rows.empty:
+        return ok(
+            "Observed: No Completed rows found in 48_Customer_Journey_Marketplac; satisfaction score not evaluated.",
+            why,
+            src,
+        )
+
+    # Average across columns H-L (indices 7-11) for all Completed rows
+    score_cols = completed_rows.iloc[:, 7:12]
+    scores = []
+    for _, row in score_cols.iterrows():
+        for val in row:
+            v = _to_float(val)
+            if v is not None:
+                scores.append(v)
+
+    if not scores:
+        return ok(
+            "Observed: No valid satisfaction score values found in columns H-L for Completed rows; not evaluated.",
+            why,
+            src,
+        )
+
+    avg = sum(scores) / len(scores)
+    what = (
+        f"Observed: Average customer satisfaction score = {avg:.2f} "
+        f"(across {len(completed_rows)} Completed survey(s), columns H-L in 48_Customer_Journey_Marketplac)."
     )
+
+    if avg < 3.0:
+        return flag(what, why, src)
+    if avg <= 3.5:
+        return partial(what, why, src)
+    return ok(what, why, src)
 
 
 def eval_C021(ctx: DatabricksContext) -> cfg.ControlResult:
