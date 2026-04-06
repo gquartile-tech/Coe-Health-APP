@@ -584,7 +584,7 @@ def eval_C004(ctx: DatabricksContext) -> cfg.ControlResult:
     if df02 is None or df02.empty:
         return flag("Observed: Date range KPI tab missing; cannot evaluate ACoS goal attainment.", _why_constraint_metric(ctx, "ACOS"), src)
     if ctx.acos_constraint is None:
-        return flag("Observed: ACoS constraint missing in Client Success (O7).", _why_constraint_metric(ctx, "ACOS"), src)
+        return partial("Observed: ACoS constraint missing in Client Success (O7); constraint documentation being tracked via Account Mastery.", _why_constraint_metric(ctx, "ACOS"), src)
 
     actual = _read_cell_by_pos(df02, "M", 7)
     if actual is None:
@@ -611,7 +611,7 @@ def eval_C005(ctx: DatabricksContext) -> cfg.ControlResult:
     if df02 is None or df02.empty:
         return flag("Observed: Date range KPI tab missing; cannot evaluate TACoS goal attainment.", _why_constraint_metric(ctx, "TACOS"), src)
     if ctx.tacos_constraint is None:
-        return flag("Observed: TACoS constraint missing in Client Success (AX7).", _why_constraint_metric(ctx, "TACOS"), src)
+        return partial("Observed: TACoS constraint missing in Client Success (AX7); constraint documentation being tracked via Account Mastery.", _why_constraint_metric(ctx, "TACOS"), src)
 
     actual = _read_cell_by_pos(df02, "J", 7)
     if actual is None:
