@@ -26,7 +26,7 @@ def ok(what: str = "", why: str = "", src: str = "", note: str = "") -> cfg.Cont
 
 def partial(what: str, why: str = "", src: str = "", note: str = "") -> cfg.ControlResult:
     if not what:
-        what = "Observed: Partial signal detected."
+        what = "A partial signal was detected — some data is present but incomplete."
     return cfg.ControlResult(
         status=cfg.STATUS_PARTIAL,
         what_we_saw=what,
@@ -256,20 +256,20 @@ def _primary_kpi_tag(ctx: DatabricksContext) -> str:
 
 def _why_constraint_metric(ctx: DatabricksContext, metric: str) -> str:
     if metric.upper() == ctx.primary_kpi.upper():
-        return f"{_primary_kpi_tag(ctx)} Exceeding the {metric} constraint directly increases profitability risk and limits scaling."
-    return f"{_primary_kpi_tag(ctx)} This metric is secondary for governance but still indicates efficiency pressure if it breaches constraints."
+        return f"Primary KPI for this account: {ctx.primary_kpi}. Breaching the {metric} constraint means the account is running outside the agreed efficiency boundary with the client."
+    return f"Primary KPI for this account: {ctx.primary_kpi}. {metric} is a secondary metric but a breach still signals efficiency pressure that needs to be addressed."
 
 
 def _why_trend_metric(metric: str) -> str:
-    return f"A sustained negative trend in {metric} indicates performance deterioration that can restrict scalability."
+    return f"A declining trend in {metric} means performance is getting worse over time. If not addressed, it limits the ability to scale and maintain results."
 
 
 def _why_benchmark(metric: str, direction: str) -> str:
     if direction == "higher_worse":
-        return f"Being materially higher than category benchmark in {metric} signals weaker competitive efficiency."
+        return f"Being above the category benchmark in {metric} means this account is less efficient than comparable accounts in the same category."
     if direction == "lower_worse":
-        return f"Being materially below category benchmark in {metric} signals weaker competitive effectiveness."
-    return f"Large deviations from the category benchmark in {metric} signal a competitive positioning gap."
+        return f"Being below the category benchmark in {metric} means this account is underperforming compared to similar accounts in the same category."
+    return f"A large gap versus the category benchmark in {metric} signals a competitive positioning issue that needs to be investigated."
 
 
 # -------------------------
@@ -332,7 +332,7 @@ def _eval_abs_delta(
     df03 = get_dataset(ctx, "YEARLY_KPIS")
     why = _why_trend_metric(label)
     if df03 is None or df03.empty:
-        return flag("Observed: Yearly KPI table missing; cannot evaluate YoY trend.", why, src)
+        return flag("Yearly KPI table is missing — YoY trend cannot be evaluated.", why, src)
 
     d = _read_cell_by_pos(df03, "D", row)
     b = _read_cell_by_pos(df03, "B", row)
@@ -340,7 +340,7 @@ def _eval_abs_delta(
 
     if b is None or c is None:
         return ok(
-            f"Observed: {label} trend not evaluated because one or both comparison periods are missing (B{row}/C{row}).",
+            f"{label} trend could not be evaluated — one or both comparison periods are missing (B{row}/C{row}).",
             why,
             src,
         )
@@ -348,7 +348,7 @@ def _eval_abs_delta(
     if d is None:
         if c == 0:
             return ok(
-                f"Observed: {label} trend not evaluated because previous period is zero (C{row}=0).",
+                f"{label} trend could not be evaluated — previous period value is zero (C{row}=0).",
                 why,
                 src,
             )
@@ -365,7 +365,7 @@ def _eval_abs_delta(
             return _money_str_2(v)
         return _money_str(v)
 
-    what = f"Observed: {label} changed {_pct_str(delta)} YoY ({fmt_val(c)} → {fmt_val(b)})."
+    what = f"{label} changed {_pct_str(delta)} vs last year ({fmt_val(c)} → {fmt_val(b)})."
 
     if ad < ok_th:
         return ok(what, why, src)
@@ -391,7 +391,7 @@ def _eval_directional_delta(
     df03 = get_dataset(ctx, "YEARLY_KPIS")
     why = _why_trend_metric(label)
     if df03 is None or df03.empty:
-        return flag("Observed: Yearly KPI table missing; cannot evaluate YoY trend.", why, src)
+        return flag("Yearly KPI table is missing — YoY trend cannot be evaluated.", why, src)
 
     d = _read_cell_by_pos(df03, "D", row)
     b = _read_cell_by_pos(df03, "B", row)
@@ -399,7 +399,7 @@ def _eval_directional_delta(
 
     if b is None or c is None:
         return ok(
-            f"Observed: {label} trend not evaluated because one or both comparison periods are missing (B{row}/C{row}).",
+            f"{label} trend could not be evaluated — one or both comparison periods are missing (B{row}/C{row}).",
             why,
             src,
         )
@@ -407,7 +407,7 @@ def _eval_directional_delta(
     if d is None:
         if c == 0:
             return ok(
-                f"Observed: {label} trend not evaluated because previous period is zero (C{row}=0).",
+                f"{label} trend could not be evaluated — previous period value is zero (C{row}=0).",
                 why,
                 src,
             )
@@ -427,22 +427,32 @@ def _eval_directional_delta(
     sign = "+" if delta > 0 else ""
 
     if worse_when == "up":
-        impact_txt = "indicating higher cost/efficiency pressure" if delta > 0 else "indicating improved efficiency"
+        impact_txt = "higher cost pressure" if delta > 0 else "improved efficiency"
     elif worse_when == "down":
-        impact_txt = "indicating weaker performance" if delta < 0 else "indicating improved performance"
+        impact_txt = "weaker performance" if delta < 0 else "improved performance"
     else:
-        impact_txt = "versus last year"
+        impact_txt = "vs last year"
 
     what = (
-        f"Observed: {label} {direction_txt} versus last year, {impact_txt}. "
+        f"{label} {direction_txt} vs last year — {impact_txt}. "
         f"{fmt_val(c)} → {fmt_val(b)} ({sign}{_pct_str(delta)} YoY)."
     )
 
+    FLAG_TH = 0.25
+
     if worse_when == "up":
-        return flag(what, why, src) if delta > threshold else ok(what, why, src)
+        if delta > FLAG_TH:
+            return flag(what, why, src)
+        if delta > threshold:
+            return partial(what, why, src)
+        return ok(what, why, src)
 
     if worse_when == "down":
-        return flag(what, why, src) if delta < -threshold else ok(what, why, src)
+        if delta < -FLAG_TH:
+            return flag(what, why, src)
+        if delta < -threshold:
+            return partial(what, why, src)
+        return ok(what, why, src)
 
     return ok(what, why, src)
 
@@ -469,16 +479,13 @@ def _bench_status(dev: float, ok_th: float, partial_th: float) -> str:
 
 
 def _bench_status_directional(our: float, bench: float, direction: str) -> str:
-    if direction == "higher_worse":
-        return cfg.STATUS_FLAG if our > bench else cfg.STATUS_OK
-    if direction == "lower_worse":
-        return cfg.STATUS_FLAG if our < bench else cfg.STATUS_OK
-    return cfg.STATUS_OK
+    dev = _bench_compare_directional(our, bench, direction)
+    return _bench_status(dev, ok_th=0.10, partial_th=0.25)
 
 
 def _bench_missing_ok(metric_label: str, src: str, why: str) -> cfg.ControlResult:
     return ok(
-        f"Observed: {metric_label} benchmark comparison not evaluated because required account or benchmark data is missing.",
+        f"{metric_label} benchmark comparison could not be evaluated — account or benchmark data is missing.",
         why,
         src,
     )
@@ -493,7 +500,7 @@ def eval_C001(ctx: DatabricksContext) -> cfg.ControlResult:
     src = "04_L24M_Monthly_Performance_Sum!B (TotalSales)"
     last2 = _get_last_n_full_month_rows(df, ctx, n=2, month_col_index=0)
     if last2 is None or len(last2) < 2:
-        return flag("Observed: Monthly performance data missing or insufficient to compute MoM revenue growth.", _why_trend_metric("revenue"), src)
+        return flag("Monthly performance data is missing or insufficient to calculate MoM revenue growth.", _why_trend_metric("revenue"), src)
 
     m0 = last2.iloc[-1]["_month"]
     m1 = last2.iloc[-2]["_month"]
@@ -501,7 +508,7 @@ def eval_C001(ctx: DatabricksContext) -> cfg.ControlResult:
     rev1 = _to_float(last2.iloc[-2, 1])
 
     if rev0 is None or rev1 is None or rev1 == 0:
-        return flag("Observed: TotalSales values missing/invalid for MoM revenue calculation.", _why_trend_metric("revenue"), src)
+        return flag("TotalSales values are missing or invalid — MoM revenue growth cannot be calculated.", _why_trend_metric("revenue"), src)
 
     mom = (rev0 - rev1) / rev1
     flag_th, partial_th = _apply_seasonality_thresholds(
@@ -511,7 +518,7 @@ def eval_C001(ctx: DatabricksContext) -> cfg.ControlResult:
         base_partial=-0.05,
     )
 
-    what = f"Observed: Revenue changed {_pct_str(mom)} vs prior month ({_money_str(rev1)} → {_money_str(rev0)}) using the latest full month available."
+    what = f"Revenue changed {_pct_str(mom)} vs prior month ({_money_str(rev1)} → {_money_str(rev0)})."
     why = _why_trend_metric("revenue")
 
     if mom <= flag_th:
@@ -526,17 +533,17 @@ def eval_C002(ctx: DatabricksContext) -> cfg.ControlResult:
     src = "04_L24M_Monthly_Performance_Sum!B (TotalSales)"
     last6 = _get_last_n_full_month_rows(df, ctx, n=6, month_col_index=0)
     if last6 is None or len(last6) < 6:
-        return flag("Observed: Insufficient monthly history to compute QoQ revenue growth (need 6 full months).", _why_trend_metric("revenue"), src)
+        return flag("Not enough monthly history to calculate QoQ revenue growth — at least 6 full months are needed.", _why_trend_metric("revenue"), src)
 
     vals = [_to_float(x) for x in list(last6.iloc[:, 1])]
     months = list(last6["_month"])
     if any(v is None for v in vals):
-        return flag("Observed: Missing TotalSales values in 04_L24M_Monthly_Performance_Sum for QoQ computation.", _why_trend_metric("revenue"), src)
+        return flag("TotalSales values are missing in monthly data — QoQ revenue growth cannot be calculated.", _why_trend_metric("revenue"), src)
 
     q0 = sum(vals[-3:])
     q1 = sum(vals[:3])
     if q1 == 0:
-        return flag("Observed: Previous-quarter revenue is zero/invalid; QoQ cannot be computed.", _why_trend_metric("revenue"), src)
+        return flag("Previous quarter revenue is zero or invalid — QoQ growth cannot be calculated.", _why_trend_metric("revenue"), src)
 
     qoq = (q0 - q1) / q1
     flag_th, partial_th = _apply_seasonality_thresholds(
@@ -546,7 +553,7 @@ def eval_C002(ctx: DatabricksContext) -> cfg.ControlResult:
         base_partial=-0.05,
     )
 
-    what = f"Observed: Revenue changed {_pct_str(qoq)} comparing the last 3 full months ({_money_str(q1)} → {_money_str(q0)})."
+    what = f"Revenue changed {_pct_str(qoq)} comparing the last 3 full months vs the prior 3 months ({_money_str(q1)} → {_money_str(q0)})."
     why = _why_trend_metric("revenue")
 
     if qoq <= flag_th:
@@ -560,15 +567,15 @@ def eval_C003(ctx: DatabricksContext) -> cfg.ControlResult:
     df = get_dataset(ctx, "YEARLY_KPIS")
     src = "03_Yearly_KPIs_Current_vs_Last_!B18/C18 (TotalSales)"
     if df is None or df.empty:
-        return flag("Observed: Yearly KPI table missing; cannot evaluate YoY revenue growth.", _why_trend_metric("revenue"), src)
+        return flag("Yearly KPI table is missing — YoY revenue growth cannot be evaluated.", _why_trend_metric("revenue"), src)
 
     cur = _read_cell_by_pos(df, "B", 18)
     prev = _read_cell_by_pos(df, "C", 18)
     if cur is None or prev is None or prev == 0:
-        return flag("Observed: TotalSales values missing in 03_Yearly_KPIs_Current_vs_Last_ (B18/C18).", _why_trend_metric("revenue"), src)
+        return flag("TotalSales values are missing in yearly KPI data (B18/C18) — YoY revenue growth cannot be calculated.", _why_trend_metric("revenue"), src)
 
     yoy = (cur - prev) / prev
-    what = f"Observed: Revenue changed {_pct_str(yoy)} vs previous period ({_money_str(prev)} → {_money_str(cur)}) based on TotalSales in 03_Yearly_KPIs_Current_vs_Last_."
+    what = f"Revenue changed {_pct_str(yoy)} vs previous period ({_money_str(prev)} → {_money_str(cur)})."
     why = _why_trend_metric("revenue")
 
     if yoy <= -0.10:
@@ -582,84 +589,84 @@ def eval_C004(ctx: DatabricksContext) -> cfg.ControlResult:
     df02 = get_dataset(ctx, "KPI_RANGE")
     src = "02_Date_Range_KPIs__Date_Range_!M7 vs 38_Client_Success_Insights_Repo!O7"
     if df02 is None or df02.empty:
-        return flag("Observed: Date range KPI tab missing; cannot evaluate ACoS goal attainment.", _why_constraint_metric(ctx, "ACOS"), src)
+        return flag("Date range KPI tab is missing — ACoS goal attainment cannot be evaluated.", _why_constraint_metric(ctx, "ACOS"), src)
     if ctx.acos_constraint is None:
-        return partial("Observed: ACoS constraint missing in Client Success (O7); constraint documentation being tracked via Account Mastery.", _why_constraint_metric(ctx, "ACOS"), src)
+        return partial("ACoS constraint is not documented in Client Success (O7). This is being tracked via Account Mastery.", _why_constraint_metric(ctx, "ACOS"), src)
 
     actual = _read_cell_by_pos(df02, "M", 7)
     if actual is None:
-        return flag("Observed: Current ACoS missing in 02_Date_Range_KPIs__Date_Range_ (M7).", _why_constraint_metric(ctx, "ACOS"), src)
+        return flag("Current ACoS value is missing in the date range KPI tab (M7).", _why_constraint_metric(ctx, "ACOS"), src)
     if actual > 1:
         actual = actual / 100.0
 
     target = ctx.acos_constraint
-    what = f"Observed: Current ACoS = {_pct_str(actual)} vs ACoS constraint = {_pct_str(target)}."
+    what = f"Current ACoS = {_pct_str(actual)} vs agreed constraint = {_pct_str(target)}."
     why = _why_constraint_metric(ctx, "ACOS")
 
     if actual <= target * 1.05:
         return ok(what, why, src)
     if actual <= target * 1.10:
         over_pp = (actual - target) * 100
-        return partial(f"{what} (over by {over_pp:.1f}pp).", why, src)
+        return partial(f"Current ACoS = {_pct_str(actual)} vs agreed constraint = {_pct_str(target)} (over by {over_pp:.1f}pp).", why, src)
     over_pp = (actual - target) * 100
-    return flag(f"{what} (over by {over_pp:.1f}pp).", why, src)
+    return flag(f"Current ACoS = {_pct_str(actual)} vs agreed constraint = {_pct_str(target)} (over by {over_pp:.1f}pp).", why, src)
 
 
 def eval_C005(ctx: DatabricksContext) -> cfg.ControlResult:
     df02 = get_dataset(ctx, "KPI_RANGE")
     src = "02_Date_Range_KPIs__Date_Range_!J7 vs 38_Client_Success_Insights_Repo!AX7"
     if df02 is None or df02.empty:
-        return flag("Observed: Date range KPI tab missing; cannot evaluate TACoS goal attainment.", _why_constraint_metric(ctx, "TACOS"), src)
+        return flag("Date range KPI tab is missing — TACoS goal attainment cannot be evaluated.", _why_constraint_metric(ctx, "TACOS"), src)
     if ctx.tacos_constraint is None:
-        return partial("Observed: TACoS constraint missing in Client Success (AX7); constraint documentation being tracked via Account Mastery.", _why_constraint_metric(ctx, "TACOS"), src)
+        return partial("TACoS constraint is not documented in Client Success (AX7). This is being tracked via Account Mastery.", _why_constraint_metric(ctx, "TACOS"), src)
 
     actual = _read_cell_by_pos(df02, "J", 7)
     if actual is None:
-        return flag("Observed: Current TACoS missing in 02_Date_Range_KPIs__Date_Range_ (J7).", _why_constraint_metric(ctx, "TACOS"), src)
+        return flag("Current TACoS value is missing in the date range KPI tab (J7).", _why_constraint_metric(ctx, "TACOS"), src)
     if actual > 1:
         actual = actual / 100.0
 
     target = ctx.tacos_constraint
-    what = f"Observed: Current TACoS = {_pct_str(actual)} vs TACoS constraint = {_pct_str(target)}."
+    what = f"Current TACoS = {_pct_str(actual)} vs agreed constraint = {_pct_str(target)}."
     why = _why_constraint_metric(ctx, "TACOS")
 
     if actual <= target * 1.05:
         return ok(what, why, src)
     if actual <= target * 1.10:
         over_pp = (actual - target) * 100
-        return partial(f"{what} (over by {over_pp:.1f}pp).", why, src)
+        return partial(f"Current TACoS = {_pct_str(actual)} vs agreed constraint = {_pct_str(target)} (over by {over_pp:.1f}pp).", why, src)
     over_pp = (actual - target) * 100
-    return flag(f"{what} (over by {over_pp:.1f}pp).", why, src)
+    return flag(f"Current TACoS = {_pct_str(actual)} vs agreed constraint = {_pct_str(target)} (over by {over_pp:.1f}pp).", why, src)
 
 
 def eval_C006(ctx: DatabricksContext) -> cfg.ControlResult:
     df02 = get_dataset(ctx, "KPI_RANGE")
     src = "02_Date_Range_KPIs__Date_Range_!G7 vs 38_Client_Success_Insights_Repo!AM7 (budget target)"
-    why = f"{_primary_kpi_tag(ctx)} Budget pacing indicates whether investment levels match the planned growth/profitability strategy."
+    why = f"Primary KPI for this account: {ctx.primary_kpi}. Budget pacing shows whether investment levels match the planned strategy."
     if df02 is None or df02.empty:
-        return flag("Observed: Date range KPI tab missing; cannot evaluate budget pacing.", why, src)
+        return flag("Date range KPI tab is missing — budget pacing cannot be evaluated.", why, src)
 
     spend = _read_cell_by_pos(df02, "G", 7)
     if spend is None:
-        return flag("Observed: Spend value missing in 02_Date_Range_KPIs__Date_Range_ (G7).", why, src)
+        return flag("Spend value is missing in the date range KPI tab (G7).", why, src)
 
     if ctx.budget_target_from_cs is None:
         return ok(
-            "Observed: Budget target not documented in Client Success context (AM7); budget pacing not evaluated.",
+            "No budget target is documented in Client Success context (AM7) — budget pacing not evaluated.",
             why,
             src,
         )
 
     budget = float(ctx.budget_target_from_cs)
     if budget == 0:
-        return flag("Observed: Budget target is zero/invalid; cannot evaluate pacing.", why, src)
+        return flag("Budget target is zero or invalid — pacing cannot be evaluated.", why, src)
 
     dev = (spend - budget) / budget
     abs_dev = abs(dev)
 
     what = (
-        f"Observed: Spend is {'above' if dev > 0 else 'below'} the documented budget target. "
-        f"{_money_str(budget)} target vs {_money_str(spend)} actual ({_pct_str(dev)})."
+        f"Spend is {'above' if dev > 0 else 'below'} the documented budget target. "
+        f"Target: {_money_str(budget)} | Actual: {_money_str(spend)} ({_pct_str(dev)})."
     )
 
     if abs_dev <= 0.10:
@@ -745,23 +752,23 @@ def eval_C013(ctx: DatabricksContext) -> cfg.ControlResult:
     src = "38_Client_Success_Insights_Repo!AG7 ÷ avg(05_Monthly_Sales_YoY_Comparison!C last 3 full months)"
     why = "Fees-to-sales ratio indicates whether service costs remain sustainable relative to account revenue size."
     if ctx.mrr_fee is None:
-        return flag("Observed: MRR fee missing in Client Success repo (AG7).", why, src)
+        return flag("MRR fee is missing in Client Success repo (AG7) — fee-to-sales ratio cannot be calculated.", why, src)
 
     df05 = get_dataset(ctx, "MONTHLY_YOY")
     last3 = _get_last_n_full_month_rows(df05, ctx, n=3, month_col_index=0)
     if last3 is None or len(last3) < 3:
-        return flag("Observed: Monthly sales YoY tab missing/insufficient to compute last-3-month average sales for fee ratio.", why, src)
+        return flag("Monthly sales data is missing or insufficient to compute the 3-month average for fee ratio.", why, src)
 
     sales_vals = [_to_float(x) for x in list(last3.iloc[:, 2])]
     if any(v is None for v in sales_vals):
-        return flag("Observed: Total sales values missing in 05_Monthly_Sales_YoY_Comparison column C for fee ratio computation.", why, src)
+        return flag("Total sales values are missing in monthly data — fee ratio cannot be calculated.", why, src)
 
     avg_sales = sum(sales_vals) / 3.0
     if avg_sales == 0:
-        return flag("Observed: 3-month average sales is zero/invalid; cannot compute fee ratio.", why, src)
+        return flag("3-month average sales is zero or invalid — fee ratio cannot be calculated.", why, src)
 
     ratio = float(ctx.mrr_fee) / avg_sales
-    what = f"Observed: Monthly fee = {_money_str(float(ctx.mrr_fee))} and the 3-month average revenue = {_money_str(avg_sales)}, resulting in a fee-to-sales ratio of {_pct_str(ratio)}."
+    what = f"Monthly fee = {_money_str(float(ctx.mrr_fee))} | 3-month average revenue = {_money_str(avg_sales)} | Fee-to-sales ratio = {_pct_str(ratio)}."
 
     if ratio < 0.10:
         return ok(what, why, src)
@@ -772,16 +779,16 @@ def eval_C013(ctx: DatabricksContext) -> cfg.ControlResult:
 
 def eval_C014(ctx: DatabricksContext) -> cfg.ControlResult:
     return ok(
-        "Observed: NTB% dataset not available in the Databricks export; control currently not evaluated.",
-        "NTB% dataset pending integration (AMC source)",
+        "NTB% data is not yet available in the Databricks export — this control is pending integration.",
+        "New-to-brand rate shows how well the account is acquiring new customers. It will be evaluated once the AMC data source is connected.",
         "AMC (external)",
     )
 
 
 def eval_C015(ctx: DatabricksContext) -> cfg.ControlResult:
     return ok(
-        "Observed: Organic rank dataset not available in the Databricks export; control currently not evaluated.",
-        "Organic rank dataset pending integration",
+        "Organic rank data is not yet available in the Databricks export — this control is pending integration.",
+        "Organic rank indicates whether advertising investment is contributing to long-term organic visibility. It will be evaluated once the external data source is connected.",
         "External dataset (pending)",
     )
 
@@ -789,15 +796,15 @@ def eval_C015(ctx: DatabricksContext) -> cfg.ControlResult:
 def eval_C016(ctx: DatabricksContext) -> cfg.ControlResult:
     df42 = get_dataset(ctx, "GGS_DOMO")
     src = "42_Amazon_GGS_Domo!H7/H8/H9 + 09_Campaigns_Grouped_by_Amazon_!I (Sponsored Display spend %)"
-    why = "GGS pacing flags indicate whether planned growth programs are executing as expected. SD spend share validates Sponsored Display investment is sufficient to support growth commitments."
+    why = "GGS pacing flags show whether planned growth programs are executing as expected. SD spend share confirms Sponsored Display investment is sufficient to support growth commitments."
     if df42 is None or df42.empty:
-        return flag("Observed: GGS Domo tab missing; cannot evaluate GGS pacing.", why, src)
+        return flag("GGS Domo tab is missing — GGS pacing cannot be evaluated.", why, src)
     h7 = _read_str_cell_by_pos(df42, "H", 7).lower()
     h8 = _read_str_cell_by_pos(df42, "H", 8).lower()
     h9 = _read_str_cell_by_pos(df42, "H", 9).lower()
     if not (h7 or h8 or h9):
-        return flag("Observed: GGS pacing fields missing in 42_Amazon_GGS_Domo (H7–H9).", why, src)
-    what_ggs = f"Observed: GGS pacing flags (SD/SP/SB) = {h7}/{h8}/{h9}."
+        return flag("GGS pacing fields are missing in the GGS Domo tab (H7–H9).", why, src)
+    what_ggs = f"GGS pacing flags (SD/SP/SB) = {h7}/{h8}/{h9}."
 
     # If GGS is not triggered, always OK — no further checks needed
     if not any(v == "yes" for v in [h7, h8, h9]):
@@ -808,10 +815,7 @@ def eval_C016(ctx: DatabricksContext) -> cfg.ControlResult:
     sd_pct = None
     if df09 is not None and not df09.empty:
         for i in range(len(df09)):
-            raw = df09.iloc[i, 0]
-            if raw is None or (isinstance(raw, float) and pd.isna(raw)):
-                continue
-            row_label = str(raw).strip().lower()
+            row_label = str(df09.iloc[i, 0]).strip().lower() if df09.iloc[i, 0] is not None else ""
             if "sponsored display" in row_label:
                 sd_pct = _to_float(df09.iloc[i, _col_letter_to_zero_index("I")])
                 break
@@ -838,15 +842,15 @@ def eval_C016(ctx: DatabricksContext) -> cfg.ControlResult:
 def eval_C017(ctx: DatabricksContext) -> cfg.ControlResult:
     df42 = get_dataset(ctx, "GGS_DOMO")
     src = "42_Amazon_GGS_Domo!K7/K8/K9"
-    why = "DAA pacing flags indicate whether key demand acceleration investments are on track."
+    why = "DAA pacing flags show whether key demand acceleration investments are on track."
     if df42 is None or df42.empty:
-        return ok("Observed: GGS Domo tab missing; DAA pacing not evaluated.", why, src)
+        return ok("GGS Domo tab is missing — DAA pacing not evaluated.", why, src)
     k7 = _read_str_cell_by_pos(df42, "K", 7).lower()
     k8 = _read_str_cell_by_pos(df42, "K", 8).lower()
     k9 = _read_str_cell_by_pos(df42, "K", 9).lower()
     if not (k7 or k8 or k9):
-        return ok("Observed: DAA pacing fields missing in 42_Amazon_GGS_Domo (K7-K9); not evaluated.", why, src)
-    what = f"Observed: DAA pacing flags (SD/SP/SB) = {k7}/{k8}/{k9}."
+        return ok("DAA pacing fields are missing in the GGS Domo tab (K7–K9) — not evaluated.", why, src)
+    what = f"DAA pacing flags (SD/SP/SB) = {k7}/{k8}/{k9}."
     if any(v == "true" for v in [k7, k8, k9]):
         return partial(what, why, src)
     return ok(what, why, src)
@@ -855,15 +859,15 @@ def eval_C017(ctx: DatabricksContext) -> cfg.ControlResult:
 def eval_C018(ctx: DatabricksContext) -> cfg.ControlResult:
     df42 = get_dataset(ctx, "GGS_DOMO")
     src = "42_Amazon_GGS_Domo!M7/M8/M9"
-    why = "SAS pacing flags indicate whether strategic support initiatives are executing as committed."
+    why = "SAS pacing flags show whether strategic support initiatives are executing as committed."
     if df42 is None or df42.empty:
-        return ok("Observed: GGS Domo tab missing; SAS pacing not evaluated.", why, src)
+        return ok("GGS Domo tab is missing — SAS pacing not evaluated.", why, src)
     m7 = _read_str_cell_by_pos(df42, "M", 7).lower()
     m8 = _read_str_cell_by_pos(df42, "M", 8).lower()
     m9 = _read_str_cell_by_pos(df42, "M", 9).lower()
     if not (m7 or m8 or m9):
-        return ok("Observed: SAS pacing fields missing in 42_Amazon_GGS_Domo (M7-M9); not evaluated.", why, src)
-    what = f"Observed: SAS pacing flags (SD/SP/SB) = {m7}/{m8}/{m9}."
+        return ok("SAS pacing fields are missing in the GGS Domo tab (M7–M9) — not evaluated.", why, src)
+    what = f"SAS pacing flags (SD/SP/SB) = {m7}/{m8}/{m9}."
     if any(v == "true" for v in [m7, m8, m9]):
         return partial(what, why, src)
     return ok(what, why, src)
@@ -871,83 +875,71 @@ def eval_C018(ctx: DatabricksContext) -> cfg.ControlResult:
 
 def eval_C019(ctx: DatabricksContext) -> cfg.ControlResult:
     df46 = get_dataset(ctx, "STRIPE")
-    src = "46_Stripe_Payments!B (CreatedDate) vs C (PaymentDate)"
+    src = "46_Stripe_Payments!C (PaymentDate)"
     why = "Delayed or missed payments increase client risk exposure and indicate potential retention or financial stress."
 
     if df46 is None or df46.empty:
-        return flag("Observed: Stripe payments tab missing; cannot evaluate Financial Risk Indicator.", why, src)
+        return flag("Stripe payments tab is missing — Financial Risk Indicator cannot be evaluated.", why, src)
 
-    # Parse CreatedDate (col B = index 1) and PaymentDate (col C = index 2)
     try:
-        created = pd.to_datetime(df46.iloc[:, 1], errors="coerce")
-        payment = pd.to_datetime(df46.iloc[:, 2], errors="coerce")
+        pay_dates = pd.to_datetime(df46.iloc[:, 2], errors="coerce").dropna()
     except Exception:
-        return flag("Observed: Could not parse CreatedDate/PaymentDate columns in 46_Stripe_Payments.", why, src)
+        pay_dates = pd.Series([], dtype="datetime64[ns]")
 
-    # Drop rows where CreatedDate itself is missing — nothing to evaluate
-    valid_mask = created.notna()
-    if valid_mask.sum() == 0:
-        return flag("Observed: No valid CreatedDate entries found in 46_Stripe_Payments; cannot evaluate.", why, src)
-
-    # Determine lookback anchor from ref_date or latest CreatedDate
-    anchor = (
-        pd.Timestamp(ctx.ref_date)
-        if ctx.ref_date
-        else created[valid_mask].max()
-    )
-    cutoff_6m = anchor - pd.DateOffset(months=6)
-    cutoff_3m = anchor - pd.DateOffset(months=3)
-
-    late_last3 = []
-    late_3to6 = []
-
-    for i in df46.index:
-        cd = created.iloc[i] if i < len(created) else pd.NaT
-        pd_ = payment.iloc[i] if i < len(payment) else pd.NaT
-
-        if pd.isna(cd):
-            continue
-
-        # Only evaluate rows within the 6-month lookback window
-        if cd < cutoff_6m:
-            continue
-
-        # Determine if late: PaymentDate missing OR gap > 3 days
-        if pd.isna(pd_):
-            late = True
-            gap_str = "PaymentDate missing"
-        else:
-            gap = (pd_ - cd).days
-            late = gap > 3
-            gap_str = f"gap = {gap} days"
-
-        if late:
-            entry = f"{cd.date()} (CreatedDate) — {gap_str}"
-            if cd >= cutoff_3m:
-                late_last3.append(entry)
-            else:
-                late_3to6.append(entry)
-
-    total_late = len(late_last3) + len(late_3to6)
-    total_rows = valid_mask.sum()
-
-    if total_late == 0:
-        what = (
-            f"Observed: All {total_rows} payment(s) within the 6-month lookback window have CreatedDate "
-            f"to PaymentDate gap ≤ 3 days. No late or missing payments detected."
+    if pay_dates.empty:
+        return flag(
+            "No valid payment dates found in Stripe payments tab (column C) — payment punctuality cannot be evaluated.",
+            why,
+            src,
         )
-        return ok(what, why, src)
+
+    first_payment = pay_dates.min().date()
+    billing_day = first_payment.day
+
+    anchor = (
+        pd.Timestamp(ctx.ref_date).to_period("M").to_timestamp()
+        if ctx.ref_date
+        else pay_dates.max().to_period("M").to_timestamp()
+    )
+
+    months = [(anchor - pd.offsets.MonthBegin(i)).to_period("M").to_timestamp() for i in range(1, 7)]
+
+    pay_df = pd.DataFrame({"dt": pay_dates})
+    pay_df["y"] = pay_df["dt"].dt.year
+    pay_df["m"] = pay_df["dt"].dt.month
+    pay_df["d"] = pay_df["dt"].dt.day
+    days_by_month = pay_df.groupby(["y", "m"])["d"].apply(set).to_dict()
+
+    missing_last3 = []
+    missing_3to6 = []
+
+    def _dim(y: int, m: int) -> int:
+        return pd.Period(f"{y}-{m:02d}", freq="M").days_in_month
+
+    for idx, m in enumerate(months, start=1):
+        day = min(billing_day, _dim(m.year, m.month))
+        lower = max(1, day - 3)
+        upper = min(_dim(m.year, m.month), day + 3)
+
+        paid_days = days_by_month.get((m.year, m.month), set())
+        on_time = any(lower <= d <= upper for d in paid_days)
+
+        if not on_time:
+            expected_window = f"{m.year}-{m.month:02d}-{lower:02d} to {m.year}-{m.month:02d}-{upper:02d}"
+            if idx <= 3:
+                missing_last3.append(expected_window)
+            else:
+                missing_3to6.append(expected_window)
 
     what = (
-        f"Observed: {total_late} late or missing payment(s) detected out of {total_rows} row(s) "
-        f"in the 6-month lookback. "
-        f"Last 3 months: {len(late_last3)} issue(s) — {late_last3}. "
-        f"Months 3–6: {len(late_3to6)} issue(s) — {late_3to6}."
+        f"Billing day is day {billing_day} (first payment: {first_payment}). "
+        f"Expected window: billing day ± 3 days. "
+        f"Missed payments in last 3 months: {missing_last3}. Missed payments in months 3–6: {missing_3to6}."
     )
 
-    if late_last3:
+    if missing_last3:
         return flag(what, why, src)
-    if late_3to6:
+    if missing_3to6:
         return partial(what, why, src)
     return ok(what, why, src)
 
@@ -959,7 +951,7 @@ def eval_C020(ctx: DatabricksContext) -> cfg.ControlResult:
 
     if df is None or df.empty:
         return ok(
-            "Observed: Customer Journey Marketplaces tab missing; satisfaction score not evaluated.",
+            "Customer Journey Marketplaces tab is missing — satisfaction score not evaluated.",
             why,
             src,
         )
@@ -970,14 +962,14 @@ def eval_C020(ctx: DatabricksContext) -> cfg.ControlResult:
         completed_rows = df[milestone_col == "completed"]
     except Exception:
         return ok(
-            "Observed: Could not parse Milestone column in 48_Customer_Journey_Marketplac; not evaluated.",
+            "Could not read the Milestone column in the Customer Journey tab — satisfaction score not evaluated.",
             why,
             src,
         )
 
     if completed_rows.empty:
         return ok(
-            "Observed: No Completed rows found in 48_Customer_Journey_Marketplac; satisfaction score not evaluated.",
+            "No Completed rows found in the Customer Journey tab — satisfaction score not evaluated.",
             why,
             src,
         )
@@ -993,15 +985,15 @@ def eval_C020(ctx: DatabricksContext) -> cfg.ControlResult:
 
     if not scores:
         return ok(
-            "Observed: No valid satisfaction score values found in columns H-L for Completed rows; not evaluated.",
+            "No valid satisfaction score values found in columns H–L for Completed rows — not evaluated.",
             why,
             src,
         )
 
     avg = sum(scores) / len(scores)
     what = (
-        f"Observed: Average customer satisfaction score = {avg:.2f} "
-        f"(across {len(completed_rows)} Completed survey(s), columns H-L in 48_Customer_Journey_Marketplac)."
+        f"Average customer satisfaction score = {avg:.2f} "
+        f"(across {len(completed_rows)} completed survey(s))."
     )
 
     if avg < 3.0:
@@ -1031,8 +1023,8 @@ def eval_C021(ctx: DatabricksContext) -> cfg.ControlResult:
 
     status = _bench_status_directional(our, bench, "higher_worse")
     what = (
-        f"Observed: ACoS is {'above' if our > bench else 'in line with or below'} the category benchmark. "
-        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+        f"ACoS is {'above' if our > bench else 'in line with or below'} the category benchmark. "
+        f"Benchmark: {_pct_str(bench)} | Actual: {_pct_str(our)}."
     )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
 
@@ -1057,8 +1049,8 @@ def eval_C022(ctx: DatabricksContext) -> cfg.ControlResult:
 
     status = _bench_status_directional(our, bench, "lower_worse")
     what = (
-        f"Observed: Conversion Rate is {'below' if our < bench else 'in line with or above'} the category benchmark. "
-        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+        f"Conversion Rate is {'below' if our < bench else 'in line with or above'} the category benchmark. "
+        f"Benchmark: {_pct_str(bench)} | Actual: {_pct_str(our)}."
     )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
 
@@ -1083,8 +1075,8 @@ def eval_C023(ctx: DatabricksContext) -> cfg.ControlResult:
 
     status = _bench_status_directional(our, bench, "higher_worse")
     what = (
-        f"Observed: TACoS is {'above' if our > bench else 'in line with or below'} the category benchmark. "
-        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+        f"TACoS is {'above' if our > bench else 'in line with or below'} the category benchmark. "
+        f"Benchmark: {_pct_str(bench)} | Actual: {_pct_str(our)}."
     )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
 
@@ -1104,8 +1096,8 @@ def eval_C024(ctx: DatabricksContext) -> cfg.ControlResult:
 
     status = _bench_status_directional(our, bench, "higher_worse")
     what = (
-        f"Observed: CPC is {'above' if our > bench else 'in line with or below'} the category benchmark. "
-        f"{_money_str_2(bench)} benchmark vs {_money_str_2(our)} actual."
+        f"CPC is {'above' if our > bench else 'in line with or below'} the category benchmark. "
+        f"Benchmark: {_money_str_2(bench)} | Actual: {_money_str_2(our)}."
     )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
 
@@ -1130,8 +1122,8 @@ def eval_C025(ctx: DatabricksContext) -> cfg.ControlResult:
 
     status = _bench_status_directional(our, bench, "lower_worse")
     what = (
-        f"Observed: Organic Sales Rate is {'below' if our < bench else 'in line with or above'} the category benchmark. "
-        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+        f"Organic Sales Rate is {'below' if our < bench else 'in line with or above'} the category benchmark. "
+        f"Benchmark: {_pct_str(bench)} | Actual: {_pct_str(our)}."
     )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
 
@@ -1156,8 +1148,8 @@ def eval_C026(ctx: DatabricksContext) -> cfg.ControlResult:
 
     status = _bench_status_directional(our, bench, "lower_worse")
     what = (
-        f"Observed: Sales Growth is {'below' if our < bench else 'in line with or above'} the category benchmark. "
-        f"{_pct_str(bench)} benchmark vs {_pct_str(our)} actual."
+        f"Sales Growth is {'below' if our < bench else 'in line with or above'} the category benchmark. "
+        f"Benchmark: {_pct_str(bench)} | Actual: {_pct_str(our)}."
     )
     return cfg.ControlResult(status=status, what_we_saw=what, why_it_matters=why, data_source=src)
 
@@ -1201,8 +1193,8 @@ def evaluate_all(ctx: DatabricksContext) -> Tuple[Dict[str, cfg.ControlResult], 
         except Exception as e:
             results[cid] = cfg.ControlResult(
                 status=cfg.STATUS_FLAG,
-                what_we_saw=f"Observed: EXCEPTION in {cid}: {e}",
-                why_it_matters="A processing error prevented evaluation; requires investigation to ensure diagnostic accuracy.",
+                what_we_saw=f"An error occurred while evaluating {cid}: {e}",
+                why_it_matters="A processing error stopped this control from running. Check the input file and re-run to resolve.",
                 data_source="Agent Runtime",
                 note=str(e),
             )
