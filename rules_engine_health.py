@@ -878,71 +878,82 @@ def eval_C018(ctx: DatabricksContext) -> cfg.ControlResult:
 
 def eval_C019(ctx: DatabricksContext) -> cfg.ControlResult:
     df46 = get_dataset(ctx, "STRIPE")
-    src = "46_Stripe_Payments!C (PaymentDate)"
-    why = "Delayed or missed payments increase client risk exposure and indicate potential retention or financial stress."
+    src = "46_Stripe_Payments!B (CreatedDate) vs C (PaymentDate)"
+    why = "Delayed or missing payments increase client risk exposure and indicate potential retention or financial stress."
 
     if df46 is None or df46.empty:
         return flag("Stripe payments tab is missing — Financial Risk Indicator cannot be evaluated.", why, src)
 
+    # Parse CreatedDate (col B = index 1) and PaymentDate (col C = index 2)
     try:
-        pay_dates = pd.to_datetime(df46.iloc[:, 2], errors="coerce").dropna()
+        created = pd.to_datetime(df46.iloc[:, 1], errors="coerce")
+        payment = pd.to_datetime(df46.iloc[:, 2], errors="coerce")
     except Exception:
-        pay_dates = pd.Series([], dtype="datetime64[ns]")
+        return flag("Could not parse CreatedDate or PaymentDate columns in Stripe payments tab.", why, src)
 
-    if pay_dates.empty:
-        return flag(
-            "No valid payment dates found in Stripe payments tab (column C) — payment punctuality cannot be evaluated.",
-            why,
-            src,
-        )
+    # Drop rows where CreatedDate itself is missing — nothing to evaluate
+    valid_mask = created.notna()
+    if valid_mask.sum() == 0:
+        return flag("No valid CreatedDate entries found in Stripe payments tab — cannot evaluate.", why, src)
 
-    first_payment = pay_dates.min().date()
-    billing_day = first_payment.day
-
+    # Determine 6-month lookback anchor from ref_date or latest CreatedDate
     anchor = (
-        pd.Timestamp(ctx.ref_date).to_period("M").to_timestamp()
+        pd.Timestamp(ctx.ref_date)
         if ctx.ref_date
-        else pay_dates.max().to_period("M").to_timestamp()
+        else created[valid_mask].max()
     )
+    cutoff_6m = anchor - pd.DateOffset(months=6)
+    cutoff_3m = anchor - pd.DateOffset(months=3)
 
-    months = [(anchor - pd.offsets.MonthBegin(i)).to_period("M").to_timestamp() for i in range(1, 7)]
+    late_last3 = []
+    late_3to6 = []
 
-    pay_df = pd.DataFrame({"dt": pay_dates})
-    pay_df["y"] = pay_df["dt"].dt.year
-    pay_df["m"] = pay_df["dt"].dt.month
-    pay_df["d"] = pay_df["dt"].dt.day
-    days_by_month = pay_df.groupby(["y", "m"])["d"].apply(set).to_dict()
+    for i in range(len(df46)):
+        cd = created.iloc[i] if i < len(created) else pd.NaT
+        pd_ = payment.iloc[i] if i < len(payment) else pd.NaT
 
-    missing_last3 = []
-    missing_3to6 = []
+        if pd.isna(cd):
+            continue
 
-    def _dim(y: int, m: int) -> int:
-        return pd.Period(f"{y}-{m:02d}", freq="M").days_in_month
+        # Only evaluate rows within the 6-month lookback window
+        if cd < cutoff_6m:
+            continue
 
-    for idx, m in enumerate(months, start=1):
-        day = min(billing_day, _dim(m.year, m.month))
-        lower = max(1, day - 3)
-        upper = min(_dim(m.year, m.month), day + 3)
+        # Late if PaymentDate is missing OR gap between CreatedDate and PaymentDate > 3 days
+        if pd.isna(pd_):
+            late = True
+            gap_str = "PaymentDate missing"
+        else:
+            gap = (pd_ - cd).days
+            late = gap > 3
+            gap_str = f"gap = {gap} days"
 
-        paid_days = days_by_month.get((m.year, m.month), set())
-        on_time = any(lower <= d <= upper for d in paid_days)
-
-        if not on_time:
-            expected_window = f"{m.year}-{m.month:02d}-{lower:02d} to {m.year}-{m.month:02d}-{upper:02d}"
-            if idx <= 3:
-                missing_last3.append(expected_window)
+        if late:
+            entry = f"{cd.date()} (CreatedDate) — {gap_str}"
+            if cd >= cutoff_3m:
+                late_last3.append(entry)
             else:
-                missing_3to6.append(expected_window)
+                late_3to6.append(entry)
+
+    total_late = len(late_last3) + len(late_3to6)
+    total_rows = int(valid_mask.sum())
+
+    if total_late == 0:
+        what = (
+            f"All {total_rows} payment(s) within the 6-month lookback have a CreatedDate to PaymentDate "
+            f"gap of 3 days or less. No late or missing payments detected."
+        )
+        return ok(what, why, src)
 
     what = (
-        f"Billing day is day {billing_day} (first payment: {first_payment}). "
-        f"Expected window: billing day ± 3 days. "
-        f"Missed payments in last 3 months: {missing_last3}. Missed payments in months 3–6: {missing_3to6}."
+        f"{total_late} late or missing payment(s) detected out of {total_rows} row(s) in the 6-month lookback. "
+        f"Last 3 months: {len(late_last3)} issue(s) — {late_last3}. "
+        f"Months 3–6: {len(late_3to6)} issue(s) — {late_3to6}."
     )
 
-    if missing_last3:
+    if late_last3:
         return flag(what, why, src)
-    if missing_3to6:
+    if late_3to6:
         return partial(what, why, src)
     return ok(what, why, src)
 
