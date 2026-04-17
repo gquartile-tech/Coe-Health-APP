@@ -815,7 +815,10 @@ def eval_C016(ctx: DatabricksContext) -> cfg.ControlResult:
     sd_pct = None
     if df09 is not None and not df09.empty:
         for i in range(len(df09)):
-            row_label = str(df09.iloc[i, 0]).strip().lower() if df09.iloc[i, 0] is not None else ""
+            raw = df09.iloc[i, 0]
+            if raw is None or pd.isna(raw):
+                continue
+            row_label = str(raw).strip().lower()
             if "sponsored display" in row_label:
                 sd_pct = _to_float(df09.iloc[i, _col_letter_to_zero_index("I")])
                 break
