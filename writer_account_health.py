@@ -43,7 +43,6 @@ def write_account_health_output(
     status_col = 4       # D
     what_col = 8         # H
     why_col = 9          # I
-    src_col = 10         # J
 
     # ------------------------------------------------------------------
     # SPEED UPGRADE:
@@ -68,7 +67,6 @@ def write_account_health_output(
         ws_ref.cell(row=r, column=status_col).value = res.status
         ws_ref.cell(row=r, column=what_col).value = res.what_we_saw
         ws_ref.cell(row=r, column=why_col).value = res.why_it_matters
-        ws_ref.cell(row=r, column=src_col).value = res.data_source
 
     # ------------------------------------------------------------------
     # RELIABILITY UPGRADE:
