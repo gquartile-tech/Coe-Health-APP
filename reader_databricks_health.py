@@ -188,24 +188,25 @@ def _load_allowed_sheets_to_dfs(wb_path: str) -> Dict[str, pd.DataFrame]:
     """
     Mirrors Framework agent: load only sheet names that match allowlist prefixes.
     Use header row 6 (0-index header=5) for Databricks exports.
+    Opens the file once via pd.ExcelFile to avoid re-parsing the workbook
+    for every sheet (critical for large accounts).
     """
-    xl = pd.ExcelFile(wb_path)
-    sheet_names = xl.sheet_names
-
     # build allowlist prefixes from cfg.TAB_CANDIDATES
     allowed_prefixes: List[str] = []
     for prefixes in cfg.TAB_CANDIDATES.values():
         allowed_prefixes.extend(prefixes)
 
     sheets: Dict[str, pd.DataFrame] = {}
-    for s in sheet_names:
-        if any(s.startswith(pfx) for pfx in allowed_prefixes):
-            try:
-                df = pd.read_excel(wb_path, sheet_name=s, header=5)
-                sheets[s] = df
-            except Exception:
-                # keep going; missing/failed sheets will be flagged at control evaluation
-                continue
+    # Open once — all sheet reads share this file handle
+    with pd.ExcelFile(wb_path, engine="calamine") as xl:
+        for s in xl.sheet_names:
+            if any(s.startswith(pfx) for pfx in allowed_prefixes):
+                try:
+                    df = xl.parse(s, header=5)
+                    sheets[s] = df
+                except Exception:
+                    # keep going; missing/failed sheets flagged at control evaluation
+                    continue
     return sheets
 
 
